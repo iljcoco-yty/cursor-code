@@ -1,0 +1,20 @@
+---
+description: 启用 Superpowers 技能库 - TDD、调试、协作模式与最佳实践
+alwaysApply: true
+---
+
+# Superpowers 插件
+
+本项目已集成 [Superpowers](https://github.com/obra/superpowers) 插件，提供可组合的开发技能：
+
+- **brainstorming** - 实施前的交互式设计细化
+- **test-driven-development** - RED-GREEN-REFACTOR 循环
+- **systematic-debugging** - 四阶段根因分析
+- **writing-plans** - 详细实施计划
+- **executing-plans** - 带检查点的批量执行
+- **subagent-driven-development** - 两阶段审查的快速迭代
+- **using-git-worktrees** - 并行开发分支
+- **requesting-code-review** / **receiving-code-review** - 代码审查流程
+- **verification-before-completion** - 确保修复有效
+
+技能位于 `.cursor/plugins/superpowers/skills/`。当任务有 1% 可能适用某技能时，应先阅读并遵循该技能再行动。

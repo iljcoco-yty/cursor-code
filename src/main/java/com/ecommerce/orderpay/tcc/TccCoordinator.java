@@ -16,30 +16,39 @@ public class TccCoordinator {
         this.couponTccService = couponTccService;
     }
 
-    public void executePlaceOrder(String txId, String userId, List<OrderItem> items, String couponId) {
+    public void tryPlaceOrder(String txId, long orderId, String userId, List<OrderItem> items, String couponId) {
         boolean inventoryTried = false;
         boolean couponTried = false;
         try {
-            inventoryTccService.tryReserve(txId, items);
+            inventoryTccService.tryReserve(txId, orderId, userId, items);
             inventoryTried = true;
 
             if (couponId != null && !couponId.isBlank()) {
-                couponTccService.tryReserve(txId, userId, couponId);
+                couponTccService.tryReserve(txId, orderId, userId, couponId);
                 couponTried = true;
-            }
-
-            inventoryTccService.confirm(txId);
-            if (couponTried) {
-                couponTccService.confirm(txId);
             }
         } catch (RuntimeException ex) {
             if (couponTried) {
-                couponTccService.cancel(txId);
+                couponTccService.cancel(txId, orderId, userId, couponId);
             }
             if (inventoryTried) {
-                inventoryTccService.cancel(txId);
+                inventoryTccService.cancel(txId, orderId, userId);
             }
             throw ex;
         }
+    }
+
+    public void confirmPlaceOrder(String txId, long orderId, String userId, String couponId) {
+        inventoryTccService.confirm(txId, orderId, userId);
+        if (couponId != null && !couponId.isBlank()) {
+            couponTccService.confirm(txId, orderId, userId, couponId);
+        }
+    }
+
+    public void cancelPlaceOrder(String txId, long orderId, String userId, String couponId) {
+        if (couponId != null && !couponId.isBlank()) {
+            couponTccService.cancel(txId, orderId, userId, couponId);
+        }
+        inventoryTccService.cancel(txId, orderId, userId);
     }
 }

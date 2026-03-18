@@ -8,6 +8,7 @@ public class Order {
     private final String userId;
     private final List<OrderItem> items;
     private final String couponId;
+    private final String tccTxId;
     private final long amountCents;
     private final String businessKey;
     private volatile OrderStatus status;
@@ -19,6 +20,7 @@ public class Order {
         String userId,
         List<OrderItem> items,
         String couponId,
+        String tccTxId,
         long amountCents,
         String businessKey
     ) {
@@ -26,9 +28,10 @@ public class Order {
         this.userId = userId;
         this.items = List.copyOf(items);
         this.couponId = couponId;
+        this.tccTxId = tccTxId;
         this.amountCents = amountCents;
         this.businessKey = businessKey;
-        this.status = OrderStatus.PENDING_PAYMENT;
+        this.status = OrderStatus.INIT;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
     }
@@ -47,6 +50,10 @@ public class Order {
 
     public String getCouponId() {
         return couponId;
+    }
+
+    public String getTccTxId() {
+        return tccTxId;
     }
 
     public long getAmountCents() {
@@ -69,12 +76,9 @@ public class Order {
         return updatedAt;
     }
 
-    public synchronized boolean markPaidIfPending() {
-        if (status != OrderStatus.PENDING_PAYMENT) {
-            return false;
-        }
-        status = OrderStatus.PAID;
+    public synchronized OrderStatus transit(OrderStateMachine stateMachine, OrderEvent event) {
+        status = stateMachine.next(status, event);
         updatedAt = Instant.now();
-        return true;
+        return status;
     }
 }

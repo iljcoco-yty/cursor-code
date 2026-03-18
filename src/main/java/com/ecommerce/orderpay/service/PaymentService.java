@@ -7,12 +7,15 @@ import com.ecommerce.orderpay.common.ErrorCode;
 import com.ecommerce.orderpay.common.HashUtils;
 import com.ecommerce.orderpay.common.idempotency.IdempotentExecutor;
 import com.ecommerce.orderpay.common.lock.KeyLockManager;
+import com.ecommerce.orderpay.domain.OrderEvent;
 import com.ecommerce.orderpay.domain.Order;
 import com.ecommerce.orderpay.domain.OrderStatus;
+import com.ecommerce.orderpay.domain.OrderStateMachine;
 import com.ecommerce.orderpay.domain.Payment;
 import com.ecommerce.orderpay.leaf.LeafSegmentIdGenerator;
 import com.ecommerce.orderpay.repository.OrderRepository;
 import com.ecommerce.orderpay.repository.PaymentRepository;
+import com.ecommerce.orderpay.tcc.TccCoordinator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +32,8 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final IdempotentExecutor idempotentExecutor;
     private final KeyLockManager keyLockManager;
+    private final TccCoordinator tccCoordinator;
+    private final OrderStateMachine orderStateMachine;
     private final ObjectMapper objectMapper;
 
     public PaymentService(
@@ -37,6 +42,8 @@ public class PaymentService {
         PaymentRepository paymentRepository,
         IdempotentExecutor idempotentExecutor,
         KeyLockManager keyLockManager,
+        TccCoordinator tccCoordinator,
+        OrderStateMachine orderStateMachine,
         ObjectMapper objectMapper
     ) {
         this.idGenerator = idGenerator;
@@ -44,6 +51,8 @@ public class PaymentService {
         this.paymentRepository = paymentRepository;
         this.idempotentExecutor = idempotentExecutor;
         this.keyLockManager = keyLockManager;
+        this.tccCoordinator = tccCoordinator;
+        this.orderStateMachine = orderStateMachine;
         this.objectMapper = objectMapper;
     }
 
@@ -75,8 +84,8 @@ public class PaymentService {
             }
 
             Payment paymentByExternal = paymentRepository.findByExternalNo(request.externalNo()).orElse(null);
-            if (paymentByExternal != null) {
-                return toResponse(paymentByExternal);
+            if (paymentByExternal != null && paymentByExternal.getOrderId() != order.getOrderId()) {
+                throw new BizException(ErrorCode.INVALID_ARGUMENT, "externalNo已被其他订单使用");
             }
 
             if (order.getStatus() == OrderStatus.PAID) {
@@ -85,36 +94,49 @@ public class PaymentService {
                 return toResponse(existing);
             }
 
-            if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            if (order.getStatus() != OrderStatus.PENDING_PAYMENT && order.getStatus() != OrderStatus.PAYING) {
                 throw new BizException(ErrorCode.ORDER_STATE_INVALID, "当前订单状态不可支付");
             }
 
-            long paymentId = idGenerator.nextId("payment");
-            Payment payment = new Payment(
-                paymentId,
-                order.getOrderId(),
-                order.getUserId(),
-                request.channel(),
-                request.externalNo(),
-                order.getAmountCents()
-            );
+            if (order.getStatus() == OrderStatus.PENDING_PAYMENT) {
+                order.transit(orderStateMachine, OrderEvent.PAYMENT_START);
+            }
 
-            PaymentRepository.SavePaymentResult saveResult = paymentRepository.saveIfAbsent(payment);
-            Payment persisted = saveResult.payment();
+            Payment persisted = paymentRepository.findByOrderId(order.getOrderId()).orElse(null);
+            if (persisted != null && !persisted.getExternalNo().equals(request.externalNo())) {
+                throw new BizException(ErrorCode.INVALID_ARGUMENT, "订单已存在其他支付流水号");
+            }
             if (persisted == null) {
-                throw new BizException(ErrorCode.SYSTEM_ERROR, "支付单写入异常");
+                persisted = createPayment(order, request);
             }
 
-            if (saveResult.created()) {
-                boolean updated = order.markPaidIfPending();
-                if (!updated && order.getStatus() != OrderStatus.PAID) {
-                    throw new BizException(ErrorCode.ORDER_STATE_INVALID, "订单状态更新失败");
-                }
+            tccCoordinator.confirmPlaceOrder(order.getTccTxId(), order.getOrderId(), order.getUserId(), order.getCouponId());
+            if (order.getStatus() != OrderStatus.PAID) {
+                order.transit(orderStateMachine, OrderEvent.PAYMENT_SUCCESS);
             }
+
             return toResponse(persisted);
         } finally {
             lock.unlock();
         }
+    }
+
+    private Payment createPayment(Order order, PayRequest request) {
+        long paymentId = idGenerator.nextId("payment");
+        Payment payment = new Payment(
+            paymentId,
+            order.getOrderId(),
+            order.getUserId(),
+            request.channel(),
+            request.externalNo(),
+            order.getAmountCents()
+        );
+        PaymentRepository.SavePaymentResult saveResult = paymentRepository.saveIfAbsent(payment);
+        Payment persisted = saveResult.payment();
+        if (persisted == null) {
+            throw new BizException(ErrorCode.SYSTEM_ERROR, "支付单写入异常");
+        }
+        return persisted;
     }
 
     private PayResponse toResponse(Payment payment) {

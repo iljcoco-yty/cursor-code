@@ -8,8 +8,10 @@ import com.ecommerce.orderpay.common.ErrorCode;
 import com.ecommerce.orderpay.common.HashUtils;
 import com.ecommerce.orderpay.common.guard.DuplicateGuard;
 import com.ecommerce.orderpay.common.idempotency.IdempotentExecutor;
+import com.ecommerce.orderpay.domain.OrderEvent;
 import com.ecommerce.orderpay.domain.Order;
 import com.ecommerce.orderpay.domain.OrderItem;
+import com.ecommerce.orderpay.domain.OrderStateMachine;
 import com.ecommerce.orderpay.leaf.LeafSegmentIdGenerator;
 import com.ecommerce.orderpay.repository.OrderRepository;
 import com.ecommerce.orderpay.tcc.TccCoordinator;
@@ -30,6 +32,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final DuplicateGuard duplicateGuard;
     private final IdempotentExecutor idempotentExecutor;
+    private final OrderStateMachine orderStateMachine;
     private final ObjectMapper objectMapper;
 
     public OrderService(
@@ -38,6 +41,7 @@ public class OrderService {
         OrderRepository orderRepository,
         DuplicateGuard duplicateGuard,
         IdempotentExecutor idempotentExecutor,
+        OrderStateMachine orderStateMachine,
         ObjectMapper objectMapper
     ) {
         this.idGenerator = idGenerator;
@@ -45,6 +49,7 @@ public class OrderService {
         this.orderRepository = orderRepository;
         this.duplicateGuard = duplicateGuard;
         this.idempotentExecutor = idempotentExecutor;
+        this.orderStateMachine = orderStateMachine;
         this.objectMapper = objectMapper;
     }
 
@@ -86,16 +91,17 @@ public class OrderService {
             .map(this::toDomainItem)
             .toList();
 
-        tccCoordinator.executePlaceOrder(txId, request.userId(), items, request.couponId());
-
         Order order = new Order(
             orderId,
             request.userId(),
             items,
             request.couponId(),
+            txId,
             request.amountCents(),
             businessKey
         );
+        tccCoordinator.tryPlaceOrder(txId, orderId, request.userId(), items, request.couponId());
+        order.transit(orderStateMachine, OrderEvent.PLACE_TRY_SUCCESS);
 
         OrderRepository.SaveOrderResult saveResult = orderRepository.saveIfBusinessAbsent(order);
         return toResponse(saveResult.order());

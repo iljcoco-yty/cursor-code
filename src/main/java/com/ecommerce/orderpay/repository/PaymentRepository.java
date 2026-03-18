@@ -32,8 +32,9 @@ public class PaymentRepository {
         }
         Long previous = orderIdByExternalNo.putIfAbsent(payment.getExternalNo(), payment.getOrderId());
         if (previous != null && previous != payment.getOrderId()) {
-            Payment rollback = paymentByOrderId.remove(payment.getOrderId());
-            return SavePaymentResult.duplicate(rollback);
+            paymentByOrderId.remove(payment.getOrderId());
+            Payment conflict = paymentByOrderId.get(previous);
+            return SavePaymentResult.duplicate(conflict);
         }
         return SavePaymentResult.created(payment);
     }

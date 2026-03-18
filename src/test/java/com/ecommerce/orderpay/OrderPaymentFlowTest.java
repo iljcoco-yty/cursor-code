@@ -2,6 +2,9 @@ package com.ecommerce.orderpay;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ecommerce.orderpay.tcc.TccBranch;
+import com.ecommerce.orderpay.tcc.TccPhase;
+import com.ecommerce.orderpay.tcc.TccTransactionRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -23,6 +26,9 @@ class OrderPaymentFlowTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private TccTransactionRepository tccTransactionRepository;
 
     @Test
     void should_support_idempotent_order_and_payment_flow() throws Exception {
@@ -55,6 +61,11 @@ class OrderPaymentFlowTest {
         long orderId1 = placeBody1.path("data").path("orderId").asLong();
         long orderId2 = placeBody2.path("data").path("orderId").asLong();
         assertThat(orderId2).isEqualTo(orderId1);
+        assertThat(placeBody1.path("data").path("status").asText()).isEqualTo("PENDING_PAYMENT");
+        String txId = "ORDER-TCC-" + orderId1;
+        assertThat(tccTransactionRepository.hasSuccess(txId, TccBranch.INVENTORY, TccPhase.TRY)).isTrue();
+        assertThat(tccTransactionRepository.hasSuccess(txId, TccBranch.COUPON, TccPhase.TRY)).isTrue();
+        assertThat(tccTransactionRepository.hasSuccess(txId, TccBranch.INVENTORY, TccPhase.CONFIRM)).isFalse();
 
         String payReq = """
             {
@@ -84,5 +95,7 @@ class OrderPaymentFlowTest {
         long paymentId1 = payBody1.path("data").path("paymentId").asLong();
         long paymentId2 = payBody2.path("data").path("paymentId").asLong();
         assertThat(paymentId2).isEqualTo(paymentId1);
+        assertThat(tccTransactionRepository.hasSuccess(txId, TccBranch.INVENTORY, TccPhase.CONFIRM)).isTrue();
+        assertThat(tccTransactionRepository.hasSuccess(txId, TccBranch.COUPON, TccPhase.CONFIRM)).isTrue();
     }
 }

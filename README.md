@@ -39,11 +39,12 @@ src/main/java/com/ecommerce/orderpay
     - 同 key + 不同请求体：拒绝
 - 业务防重：`userId + checkoutToken` 组成业务唯一键，避免重复提交创建多个订单
 - 订单号生成：Leaf Segment（预加载号段、并发安全）
-- 执行 TCC：
+- 执行 TCC（下单阶段只做 Try）：
     1. Inventory Try：冻结库存
     2. Coupon Try：冻结优惠券
-    3. Confirm：确认库存扣减、优惠券核销
-    4. 任一步失败则 Cancel 回滚
+    3. 任一步失败则 Cancel 回滚
+- TCC 行为会落入事务表（记录每个分支的 Try/Confirm/Cancel 及结果）
+- 订单状态机流转：`INIT -> PENDING_PAYMENT`
 
 ### 2) 支付流程
 
@@ -54,7 +55,8 @@ src/main/java/com/ecommerce/orderpay
 - 支付单唯一性：
     - `orderId` 唯一
     - `externalNo`（三方流水）唯一
-- 订单状态原子流转：`PENDING_PAYMENT -> PAID`
+- 支付成功后再执行 TCC Confirm（库存最终扣减、优惠券最终核销）
+- 订单状态机流转：`PENDING_PAYMENT -> PAYING -> PAID`
 
 ---
 
@@ -111,7 +113,9 @@ curl -X POST 'http://localhost:8080/api/v1/payments' \
 ### 高可用 & 高稳定
 
 - 幂等状态机（PROCESSING/DONE）避免重复执行破坏数据
+- TCC 行为事务表，便于追踪 Try/Confirm/Cancel 与补偿
 - TCC 补偿（Cancel）在异常路径回滚冻结资源
+- 订单状态机约束流转路径，避免非法状态跳转
 - 明确错误码与统一异常处理
 - Tomcat 线程池和队列参数可调（`application.yml`）
 

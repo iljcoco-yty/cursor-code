@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: order-payment-service
+
+server:
+  port: 8080
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: 400
+      min-spare: 50
+    accept-count: 1000
